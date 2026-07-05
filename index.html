@@ -231,6 +231,7 @@ input[type=number]{-moz-appearance:textfield}
     <div class="stat-c"><div class="stat-l">Moy. kcal/j</div><div class="stat-v" style="color:var(--cyan)" id="avg-kcal">—</div><div class="stat-cmp" id="cmp-kcal"></div></div>
     <div class="stat-c"><div class="stat-l">Moy. prot/j</div><div class="stat-v" style="color:var(--violet)" id="avg-prot">—</div><div class="stat-cmp" id="cmp-prot"></div></div>
   </div>
+  <div id="curve-note" style="font-size:11px;color:var(--text3);margin-bottom:10px;text-align:center"></div>
   <div class="chart-card">
     <div style="display:flex;gap:14px;margin-bottom:10px">
       <div style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:3px;background:#00ffc8;border-radius:2px"></span><span class="chart-title" style="margin:0;color:var(--cyan)">Calories</span></div>
@@ -393,7 +394,7 @@ input[type=number]{-moz-appearance:textfield}
 
 /* ═══════════ DATA & MIGRATION ═══════════ */
 const SCHEMA=2;
-let foods=[],foodDB=[],GOALS={kcal:2600,prot:210,carb:230,fat:95},gymDays={},prs=[];
+let foods=[],foodDB=[],GOALS={kcal:2600,prot:210,carb:230,fat:95},gymDays={},prs=[],excludedDays={};
 let currentDate=new Date().toISOString().split('T')[0];
 const todayStr=()=>new Date().toISOString().split('T')[0];
 
@@ -405,6 +406,7 @@ function load(){
   try{const g=localStorage.getItem('goals_v3');if(g)GOALS=JSON.parse(g);}catch(e){}
   try{gymDays=JSON.parse(localStorage.getItem('gym_v1')||'{}');}catch(e){gymDays={};}
   try{prs=JSON.parse(localStorage.getItem('prs_v1')||'[]');}catch(e){prs=[];}
+  try{excludedDays=JSON.parse(localStorage.getItem('excluded_v1')||'{}');}catch(e){excludedDays={};}
   migrate();
 }
 
@@ -437,6 +439,7 @@ function persist(){
   localStorage.setItem('goals_v3',JSON.stringify(GOALS));
   localStorage.setItem('gym_v1',JSON.stringify(gymDays));
   localStorage.setItem('prs_v1',JSON.stringify(prs));
+  localStorage.setItem('excluded_v1',JSON.stringify(excludedDays));
 }
 
 /* ═══════════ NAV ═══════════ */
@@ -779,13 +782,18 @@ function renderCurves(){
     const items=getDayFoods(ds);
     if(items.length){
       const t=getTot(items);
-      days.push({ds,label:d.getDate()+'/'+(d.getMonth()+1),kcal:Math.round(t.kcal),prot:Math.round(t.prot)});
+      days.push({ds,label:d.getDate()+'/'+(d.getMonth()+1),kcal:Math.round(t.kcal),prot:Math.round(t.prot),excluded:!!excludedDays[ds]});
     }
   }
-  const avgK=days.length?Math.round(days.reduce((s,d)=>s+d.kcal,0)/days.length):0;
-  const avgP=days.length?Math.round(days.reduce((s,d)=>s+d.prot,0)/days.length):0;
+  // Moyennes calculées uniquement sur les jours NON exclus
+  const counted=days.filter(d=>!d.excluded);
+  const avgK=counted.length?Math.round(counted.reduce((s,d)=>s+d.kcal,0)/counted.length):0;
+  const avgP=counted.length?Math.round(counted.reduce((s,d)=>s+d.prot,0)/counted.length):0;
   document.getElementById('avg-kcal').textContent=avgK||'—';
   document.getElementById('avg-prot').textContent=avgP?avgP+'g':'—';
+  const exCount=days.filter(d=>d.excluded).length;
+  const noteEl=document.getElementById('curve-note');
+  if(noteEl)noteEl.textContent=counted.length+' jour'+(counted.length>1?'s':'')+' comptabilisé'+(counted.length>1?'s':'')+(exCount?' · '+exCount+' exclu'+(exCount>1?'s':''):'');
   const cK=document.getElementById('cmp-kcal'),cP=document.getElementById('cmp-prot');
   if(avgK){const d=avgK-GOALS.kcal,p=Math.round(avgK/GOALS.kcal*100);
     cK.innerHTML='<span style="color:'+(Math.abs(p-100)<=10?'#00ffc8':d>0?'#f87171':'var(--text3)')+'">'+(d>=0?'+':'')+d+'</span> vs objectif ('+p+'%)';}
@@ -797,8 +805,8 @@ function renderCurves(){
   chMain=new Chart(ctx,{
     type:'line',
     data:{labels:days.map(d=>d.label),datasets:[
-      {label:'Calories',data:days.map(d=>d.kcal),yAxisID:'yK',borderColor:'#00ffc8',backgroundColor:'rgba(0,255,200,.08)',fill:true,tension:.3,pointRadius:4,pointHoverRadius:8,pointBackgroundColor:'#00ffc8',borderWidth:2},
-      {label:'Protéines',data:days.map(d=>d.prot),yAxisID:'yP',borderColor:'#a78bfa',backgroundColor:'rgba(167,139,250,.06)',fill:false,tension:.3,pointRadius:4,pointHoverRadius:8,pointBackgroundColor:'#a78bfa',borderWidth:2},
+      {label:'Calories',data:days.map(d=>d.kcal),yAxisID:'yK',borderColor:'#00ffc8',backgroundColor:'rgba(0,255,200,.08)',fill:true,tension:.3,pointRadius:days.map(d=>d.excluded?5:4),pointHoverRadius:8,pointBackgroundColor:days.map(d=>d.excluded?'transparent':'#00ffc8'),pointBorderColor:days.map(d=>d.excluded?'#00ffc8':'#00ffc8'),pointBorderWidth:days.map(d=>d.excluded?1.5:1),borderWidth:2},
+      {label:'Protéines',data:days.map(d=>d.prot),yAxisID:'yP',borderColor:'#a78bfa',backgroundColor:'rgba(167,139,250,.06)',fill:false,tension:.3,pointRadius:days.map(d=>d.excluded?5:4),pointHoverRadius:8,pointBackgroundColor:days.map(d=>d.excluded?'transparent':'#a78bfa'),pointBorderColor:'#a78bfa',pointBorderWidth:days.map(d=>d.excluded?1.5:1),borderWidth:2},
       {label:'Moy. kcal',data:days.map(()=>avgK),yAxisID:'yK',borderColor:'rgba(0,255,200,.4)',borderDash:[4,4],pointRadius:0,borderWidth:1.2},
       {label:'Moy. prot',data:days.map(()=>avgP),yAxisID:'yP',borderColor:'rgba(167,139,250,.4)',borderDash:[4,4],pointRadius:0,borderWidth:1.2}
     ]},
@@ -832,8 +840,25 @@ function openDayModal(ds){
     const rows=grouped[m].map(it=>'<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:0.5px solid var(--border);font-size:12.5px"><span>'+it.food+(it.qty?' <span style="color:var(--text3);font-size:10px">'+it.qty+'g</span>':'')+'</span><span class="mono" style="color:var(--cyan)">'+Math.round(it.kcal)+'</span></div>').join('');
     return '<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:600;color:var(--text2);margin-bottom:4px">'+m+'</div>'+rows+'</div>';
   }).join('');
+  // Toggle exclusion
+  const isExcluded=!!excludedDays[ds];
+  h+='<div style="border-top:0.5px solid var(--border);margin-top:6px;padding-top:14px">'
+    +'<button class="btn '+(isExcluded?'btn-cy':'btn-ghost')+'" style="width:100%" onclick="toggleExcludeDay(\''+ds+'\')">'
+    +(isExcluded?'✓ Jour exclu des moyennes — réactiver':'Exclure ce jour des moyennes')
+    +'</button>'
+    +'<div style="font-size:10.5px;color:var(--text3);margin-top:8px;line-height:1.5;text-align:center">'
+    +(isExcluded?'Ce jour n\'est pas comptabilisé dans les courbes et moyennes.':'Utile si tu as oublié de saisir des repas ce jour-là.')
+    +'</div></div>';
   document.getElementById('dm-body').innerHTML=h;
   document.getElementById('day-modal-bg').classList.add('open');
+}
+
+function toggleExcludeDay(ds){
+  if(excludedDays[ds])delete excludedDays[ds];else excludedDays[ds]=true;
+  persist();
+  renderCurves();
+  openDayModal(ds); // refresh modal state
+  toast(excludedDays[ds]?'Jour exclu des moyennes':'Jour réintégré');
 }
 
 /* ═══════════ PAGE MUSCU ═══════════ */
@@ -933,7 +958,7 @@ function saveGoals(){
 /* ═══════════ EXPORT / IMPORT ═══════════ */
 function exportData(){
   const data={schema:SCHEMA,exported:new Date().toISOString(),
-    foods_v3:foods,fooddb_v1:foodDB,goals_v3:GOALS,gym_v1:gymDays,prs_v1:prs,
+    foods_v3:foods,fooddb_v1:foodDB,goals_v3:GOALS,gym_v1:gymDays,prs_v1:prs,excluded_v1:excludedDays,
     profile_v1:JSON.parse(localStorage.getItem('profile_v1')||'{}'),
     trainings_v3:JSON.parse(localStorage.getItem('trainings_v3')||'[]')};
   const blob=new Blob([JSON.stringify(data,null,1)],{type:'application/json'});
@@ -970,6 +995,7 @@ function importData(ev){
 
       // Muscu : si format nouveau, fusionner directement
       if(inGym)gymDays={...gymDays,...inGym};
+      if(d.excluded_v1)excludedDays={...excludedDays,...d.excluded_v1};
       if(inPrs)prs=mergeById(prs,inPrs);
 
       // Si l'export vient de l'ancienne version : convertir trainings → gymDays + PRs
