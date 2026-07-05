@@ -226,7 +226,7 @@ input[type=number]{-moz-appearance:textfield}
 <!-- ═══ PAGE COURBES ═══ -->
 <div class="page" id="pg-curves">
   <div class="page-title">Courbes</div>
-  <div class="page-sub">30 derniers jours — touche un point pour le détail</div>
+  <div class="page-sub">3 derniers mois — touche un point pour le détail</div>
   <div class="stat-row">
     <div class="stat-c"><div class="stat-l">Moy. kcal/j</div><div class="stat-v" style="color:var(--cyan)" id="avg-kcal">—</div><div class="stat-cmp" id="cmp-kcal"></div></div>
     <div class="stat-c"><div class="stat-l">Moy. prot/j</div><div class="stat-v" style="color:var(--violet)" id="avg-prot">—</div><div class="stat-cmp" id="cmp-prot"></div></div>
@@ -776,7 +776,7 @@ function deleteFood(){
 let chMain=null;
 function renderCurves(){
   const days=[];
-  for(let i=29;i>=0;i--){
+  for(let i=89;i>=0;i--){
     const d=new Date();d.setDate(d.getDate()-i);
     const ds=d.toISOString().split('T')[0];
     const items=getDayFoods(ds);
@@ -816,7 +816,7 @@ function renderCurves(){
       onClick:(e,els)=>{if(els.length){const idx=els[0].index;if(days[idx])openDayModal(days[idx].ds);}},
       plugins:{legend:{display:false},tooltip:{displayColors:true,callbacks:{label:c=>c.dataset.label+': '+c.parsed.y+(c.dataset.yAxisID==='yP'?'g':' kcal')}}},
       scales:{
-        x:{ticks:{color:'#6a6a66',font:{size:9},maxTicksLimit:8},grid:{color:'#252523'}},
+        x:{ticks:{color:'#6a6a66',font:{size:9},maxTicksLimit:10},grid:{color:'#252523'}},
         yK:{position:'left',ticks:{color:'#00ffc8',font:{size:9}},grid:{color:'#252523'},title:{display:false}},
         yP:{position:'right',ticks:{color:'#a78bfa',font:{size:9}},grid:{drawOnChartArea:false},title:{display:false}}
       }
