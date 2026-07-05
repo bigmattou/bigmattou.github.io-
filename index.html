@@ -296,6 +296,19 @@ input[type=number]{-moz-appearance:textfield}
     <div id="sync-status" style="display:none;margin-top:10px;padding:9px 12px;border-radius:var(--r-md);font-size:12px"></div>
   </div>
   <div class="card">
+    <div class="card-title" style="display:flex;align-items:center;gap:8px">Lecture d'étiquette (IA) <span id="ai-dot" style="width:7px;height:7px;border-radius:50%;background:var(--text3)"></span></div>
+    <div style="font-size:12px;color:var(--text3);margin-bottom:12px;line-height:1.6">Pour lire les tableaux nutritionnels par photo, colle une clé Google Gemini (gratuite). Sans clé, une lecture locale basique est utilisée en secours.</div>
+    <div id="ai-config">
+      <label class="fl">Clé API Google Gemini</label>
+      <input type="password" id="ai-key" placeholder="AIza…" style="margin-bottom:12px" autocomplete="off">
+      <button class="btn btn-ghost" style="width:100%" onclick="saveAIKey()">Enregistrer la clé</button>
+    </div>
+    <div id="ai-active" style="display:none">
+      <div style="font-size:12px;color:#00ffc8;margin-bottom:10px">✓ Lecture IA active</div>
+      <button class="btn btn-ghost" style="width:100%;font-size:11px;min-height:36px" onclick="clearAIKey()">Retirer la clé</button>
+    </div>
+  </div>
+  <div class="card">
     <div class="card-title">Données</div>
     <div style="font-size:12px;color:var(--text3);margin-bottom:12px;line-height:1.6">Tes données vivent dans ce navigateur. Pour changer de version ou d'appareil : exporte, puis importe dans la nouvelle version. Aucune donnée n'est perdue — les clés de stockage sont stables entre versions.</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -356,7 +369,7 @@ input[type=number]{-moz-appearance:textfield}
   <input type="text" id="nf-name" placeholder="ex: Skyr vanille" style="margin-bottom:12px">
   <div class="ocr-zone" onclick="document.getElementById('nf-photo').click()">
     <div style="font-size:26px;margin-bottom:6px">📷</div>
-    <div style="font-size:12.5px;color:var(--text2)">Photographie le tableau des valeurs nutritionnelles</div><div style="font-size:10.5px;color:var(--text3);margin-top:3px">Cadre serré sur le tableau, à plat, bien éclairé</div>
+    <div style="font-size:12.5px;color:var(--text2)">Photographie le tableau des valeurs nutritionnelles</div><div style="font-size:10.5px;color:var(--text3);margin-top:3px" id="ocr-hint">Cadre serré sur le tableau, bien éclairé</div>
     <div style="font-size:10.5px;color:var(--text3);margin-top:4px">Lecture locale, rien n'est envoyé</div>
     <input type="file" id="nf-photo" accept="image/*" capture="environment" onchange="runOCR(event)" style="display:none">
   </div>
@@ -474,7 +487,7 @@ function go(pg){
   if(pg==='base')renderBase();
   if(pg==='curves')renderCurves();
   if(pg==='gym')renderGym();
-  if(pg==='goals'){loadGoalsUI();loadSyncConfig();}
+  if(pg==='goals'){loadGoalsUI();loadSyncConfig();loadAIKey();}
 }
 
 /* ═══════════ TOAST ═══════════ */
@@ -696,7 +709,27 @@ async function runOCR(ev){
   const file=ev.target.files[0];if(!file)return;
   const st=document.getElementById('ocr-status');
   st.style.display='block';
-  st.textContent='Chargement du moteur OCR…';
+
+  // ── Voie 1 : Gemini (si clé configurée) ──
+  if(aiKey){
+    st.textContent='Analyse IA de l\'étiquette…';
+    try{
+      const r=await geminiReadLabel(file);
+      if(r.kcal!=null)document.getElementById('nf-kcal').value=Math.round(r.kcal);
+      if(r.prot!=null)document.getElementById('nf-prot').value=r.prot;
+      if(r.carb!=null)document.getElementById('nf-carb').value=r.carb;
+      if(r.fat!=null)document.getElementById('nf-fat').value=r.fat;
+      const found=['kcal','prot','carb','fat'].filter(k=>r[k]!=null).length;
+      st.textContent=found>=3?'Lu par IA ✓ ('+found+'/4) — vérifie et enregistre':'IA : '+found+'/4 valeurs — complète le reste';
+      ev.target.value='';
+      return;
+    }catch(e){
+      st.textContent='IA indisponible ('+e.message.slice(0,40)+') — lecture locale…';
+    }
+  }
+
+  // ── Voie 2 : Tesseract local (secours) ──
+  st.textContent='Chargement du moteur OCR local…';
   try{
     await loadTesseract();
     st.textContent='Optimisation de l\u2019image…';
@@ -1258,8 +1291,80 @@ function mergeSnapshot(d){
   if(d.profile_v1&&Object.keys(d.profile_v1).length)localStorage.setItem('profile_v1',JSON.stringify(d.profile_v1));
 }
 
+
+/* ═══════════ LECTURE ÉTIQUETTE IA (Gemini) ═══════════ */
+let aiKey=null;
+
+function loadAIKey(){
+  aiKey=localStorage.getItem('gemini_key')||null;
+  const cfg=document.getElementById('ai-config');
+  const act=document.getElementById('ai-active');
+  const dot=document.getElementById('ai-dot');
+  if(aiKey){
+    if(cfg)cfg.style.display='none';
+    if(act)act.style.display='block';
+    if(dot)dot.style.background='#00ffc8';
+  }else{
+    if(cfg)cfg.style.display='block';
+    if(act)act.style.display='none';
+    if(dot)dot.style.background='var(--text3)';
+  }
+}
+function saveAIKey(){
+  const k=document.getElementById('ai-key').value.trim();
+  if(!k){toast('Colle ta clé');return;}
+  localStorage.setItem('gemini_key',k);
+  loadAIKey();toast('Clé enregistrée ✓');
+}
+function clearAIKey(){
+  localStorage.removeItem('gemini_key');
+  aiKey=null;
+  const f=document.getElementById('ai-key');if(f)f.value='';
+  loadAIKey();
+}
+
+function fileToBase64(file){
+  return new Promise((res,rej)=>{
+    const r=new FileReader();
+    r.onload=()=>res(r.result.split(',')[1]);
+    r.onerror=rej;
+    r.readAsDataURL(file);
+  });
+}
+
+async function geminiReadLabel(file){
+  const b64=await fileToBase64(file);
+  const prompt='Tu analyses la photo d\'un tableau de valeurs nutritionnelles d\'un produit alimentaire. '
+    +'Extrais UNIQUEMENT les valeurs POUR 100g (jamais par portion). '
+    +'Pour l\'énergie, donne les kcal (pas les kJ). '
+    +'Réponds STRICTEMENT en JSON sans texte autour, format exact : '
+    +'{"kcal":number,"prot":number,"carb":number,"fat":number}. '
+    +'prot=protéines, carb=glucides (total, pas seulement les sucres), fat=lipides/matières grasses (total, pas seulement saturés). '
+    +'Si une valeur est illisible ou absente, mets null pour cette valeur. Utilise le point comme séparateur décimal.';
+  const url='https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+encodeURIComponent(aiKey);
+  const res=await fetch(url,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      contents:[{parts:[
+        {text:prompt},
+        {inline_data:{mime_type:file.type||'image/jpeg',data:b64}}
+      ]}],
+      generationConfig:{temperature:0,maxOutputTokens:200}
+    })
+  });
+  if(!res.ok){const t=await res.text();throw new Error(res.status+' '+t.slice(0,120));}
+  const data=await res.json();
+  const txt=data.candidates?.[0]?.content?.parts?.[0]?.text||'';
+  const jsonStr=txt.replace(/```json/gi,'').replace(/```/g,'').trim();
+  const m=jsonStr.match(/\{[\s\S]*\}/);
+  if(!m)throw new Error('Réponse illisible');
+  return JSON.parse(m[0]);
+}
+
 /* ═══════════ INIT ═══════════ */
 load();
+loadAIKey();
 renderDay();
 
 </script>
