@@ -231,8 +231,13 @@ input[type=number]{-moz-appearance:textfield}
     <div class="stat-c"><div class="stat-l">Moy. kcal/j</div><div class="stat-v" style="color:var(--cyan)" id="avg-kcal">—</div><div class="stat-cmp" id="cmp-kcal"></div></div>
     <div class="stat-c"><div class="stat-l">Moy. prot/j</div><div class="stat-v" style="color:var(--violet)" id="avg-prot">—</div><div class="stat-cmp" id="cmp-prot"></div></div>
   </div>
-  <div class="chart-card"><div class="chart-title" style="color:var(--cyan)">Calories</div><canvas id="ch-kcal" height="170"></canvas></div>
-  <div class="chart-card"><div class="chart-title" style="color:var(--violet)">Protéines</div><canvas id="ch-prot" height="170"></canvas></div>
+  <div class="chart-card">
+    <div style="display:flex;gap:14px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:3px;background:#00ffc8;border-radius:2px"></span><span class="chart-title" style="margin:0;color:var(--cyan)">Calories</span></div>
+      <div style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:3px;background:#a78bfa;border-radius:2px"></span><span class="chart-title" style="margin:0;color:var(--violet)">Protéines</span></div>
+    </div>
+    <canvas id="ch-main" height="200"></canvas>
+  </div>
 </div>
 
 <!-- ═══ PAGE MUSCU ═══ -->
@@ -259,23 +264,6 @@ input[type=number]{-moz-appearance:textfield}
 <div class="page" id="pg-goals">
   <div class="page-title">Objectifs</div>
   <div class="page-sub">Profil & cibles nutritionnelles</div>
-  <div class="card">
-    <div class="card-title">Profil physique</div>
-    <div class="prof-grid">
-      <div class="prof-cell"><label class="fl" style="text-align:center">Âge</label><input type="number" id="g-age" style="color:var(--cyan)" oninput="recalcGoals()"><div class="prof-u">ANS</div></div>
-      <div class="prof-cell"><label class="fl" style="text-align:center">Taille</label><input type="number" id="g-height" style="color:var(--violet)" oninput="recalcGoals()"><div class="prof-u">CM</div></div>
-      <div class="prof-cell"><label class="fl" style="text-align:center">Poids</label><input type="number" id="g-weight" step="0.1" style="color:var(--amber)" oninput="recalcGoals()"><div class="prof-u">KG</div></div>
-    </div>
-    <label class="fl">Activité</label>
-    <select id="g-activity" onchange="recalcGoals()">
-      <option value="1.2">Sédentaire</option>
-      <option value="1.375">Légèrement actif (1-3j/sem)</option>
-      <option value="1.55" selected>Modérément actif (3-5j/sem)</option>
-      <option value="1.725">Très actif (6-7j/sem)</option>
-      <option value="1.9">Extrêmement actif</option>
-    </select>
-    <div id="recalc-preview" style="display:none;margin-top:12px"></div>
-  </div>
   <div class="card">
     <div class="card-title">Cibles journalières</div>
     <div class="goal-row"><div class="goal-lbl">Calories</div><input type="number" id="g-kcal" class="mono"></div>
@@ -782,7 +770,7 @@ function deleteFood(){
 }
 
 /* ═══════════ PAGE COURBES ═══════════ */
-let chK=null,chP=null;
+let chMain=null;
 function renderCurves(){
   const days=[];
   for(let i=29;i>=0;i--){
@@ -804,29 +792,28 @@ function renderCurves(){
   if(avgP){const d=avgP-GOALS.prot,p=Math.round(avgP/GOALS.prot*100);
     cP.innerHTML='<span style="color:'+(Math.abs(p-100)<=10?'#00ffc8':d>0?'#f87171':'var(--text3)')+'">'+(d>=0?'+':'')+d+'g</span> vs objectif ('+p+'%)';}
 
-  const mkChart=(canvasId,vals,avg,goal,color,old)=>{
-    if(old)old.destroy();
-    const ctx=document.getElementById(canvasId).getContext('2d');
-    return new Chart(ctx,{
-      type:'line',
-      data:{labels:days.map(d=>d.label),datasets:[
-        {data:vals,borderColor:color,backgroundColor:color+'18',fill:true,tension:.3,pointRadius:4,pointHoverRadius:7,pointBackgroundColor:color,borderWidth:2},
-        {data:days.map(()=>avg),borderColor:'#6a6a66',borderDash:[4,4],pointRadius:0,borderWidth:1.5},
-        {data:days.map(()=>goal),borderColor:'#f87171',borderDash:[2,4],pointRadius:0,borderWidth:1}
-      ]},
-      options:{
-        responsive:true,maintainAspectRatio:true,
-        onClick:(e,els)=>{if(els.length&&els[0].datasetIndex===0)openDayModal(days[els[0].index].ds);},
-        plugins:{legend:{display:false},tooltip:{enabled:true,displayColors:false,callbacks:{label:c=>c.parsed.y+(canvasId==='ch-prot'?'g':' kcal')}}},
-        scales:{
-          x:{ticks:{color:'#6a6a66',font:{size:9},maxTicksLimit:8},grid:{color:'#252523'}},
-          y:{ticks:{color:'#6a6a66',font:{size:9}},grid:{color:'#252523'}}
-        }
+  if(chMain)chMain.destroy();
+  const ctx=document.getElementById('ch-main').getContext('2d');
+  chMain=new Chart(ctx,{
+    type:'line',
+    data:{labels:days.map(d=>d.label),datasets:[
+      {label:'Calories',data:days.map(d=>d.kcal),yAxisID:'yK',borderColor:'#00ffc8',backgroundColor:'rgba(0,255,200,.08)',fill:true,tension:.3,pointRadius:4,pointHoverRadius:8,pointBackgroundColor:'#00ffc8',borderWidth:2},
+      {label:'Protéines',data:days.map(d=>d.prot),yAxisID:'yP',borderColor:'#a78bfa',backgroundColor:'rgba(167,139,250,.06)',fill:false,tension:.3,pointRadius:4,pointHoverRadius:8,pointBackgroundColor:'#a78bfa',borderWidth:2},
+      {label:'Moy. kcal',data:days.map(()=>avgK),yAxisID:'yK',borderColor:'rgba(0,255,200,.4)',borderDash:[4,4],pointRadius:0,borderWidth:1.2},
+      {label:'Moy. prot',data:days.map(()=>avgP),yAxisID:'yP',borderColor:'rgba(167,139,250,.4)',borderDash:[4,4],pointRadius:0,borderWidth:1.2}
+    ]},
+    options:{
+      responsive:true,maintainAspectRatio:true,
+      interaction:{mode:'index',intersect:false},
+      onClick:(e,els)=>{if(els.length){const idx=els[0].index;if(days[idx])openDayModal(days[idx].ds);}},
+      plugins:{legend:{display:false},tooltip:{displayColors:true,callbacks:{label:c=>c.dataset.label+': '+c.parsed.y+(c.dataset.yAxisID==='yP'?'g':' kcal')}}},
+      scales:{
+        x:{ticks:{color:'#6a6a66',font:{size:9},maxTicksLimit:8},grid:{color:'#252523'}},
+        yK:{position:'left',ticks:{color:'#00ffc8',font:{size:9}},grid:{color:'#252523'},title:{display:false}},
+        yP:{position:'right',ticks:{color:'#a78bfa',font:{size:9}},grid:{drawOnChartArea:false},title:{display:false}}
       }
-    });
-  };
-  chK=mkChart('ch-kcal',days.map(d=>d.kcal),avgK,GOALS.kcal,'#00ffc8',chK);
-  chP=mkChart('ch-prot',days.map(d=>d.prot),avgP,GOALS.prot,'#a78bfa',chP);
+    }
+  });
 }
 
 function openDayModal(ds){
@@ -931,41 +918,6 @@ function loadGoalsUI(){
   document.getElementById('g-prot').value=GOALS.prot;
   document.getElementById('g-carb').value=GOALS.carb;
   document.getElementById('g-fat').value=GOALS.fat;
-  try{
-    const p=JSON.parse(localStorage.getItem('profile_v1')||'{}');
-    if(p.age)document.getElementById('g-age').value=p.age;
-    if(p.height)document.getElementById('g-height').value=p.height;
-    if(p.weight)document.getElementById('g-weight').value=p.weight;
-    if(p.activity)document.getElementById('g-activity').value=p.activity;
-    if(p.age&&p.height&&p.weight)recalcGoals();
-  }catch(e){}
-}
-
-function recalcGoals(){
-  const age=parseInt(document.getElementById('g-age').value)||0;
-  const h=parseFloat(document.getElementById('g-height').value)||0;
-  const w=parseFloat(document.getElementById('g-weight').value)||0;
-  const act=parseFloat(document.getElementById('g-activity').value)||1.55;
-  const prev=document.getElementById('recalc-preview');
-  if(!age||!h||!w){prev.style.display='none';return;}
-  const bmr=Math.round(10*w+6.25*h-5*age+5);
-  const tdee=Math.round(bmr*act);
-  const prot=Math.round(w*2.2);
-  const fat=Math.round(tdee*0.25/9);
-  const carb=Math.round((tdee-prot*4-fat*9)/4);
-  prev.style.display='block';
-  prev.innerHTML='<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span style="color:var(--text2)">BMR</span><span class="mono" style="color:var(--cyan);font-weight:700">'+bmr+' kcal</span></div>'
-    +'<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:10px"><span style="color:var(--text2)">TDEE recommandé</span><span class="mono" style="color:var(--cyan);font-weight:700">'+tdee+' kcal</span></div>'
-    +'<button class="btn btn-cy" onclick="applyCalc('+tdee+','+prot+','+carb+','+fat+')">Appliquer '+tdee+' kcal · '+prot+'P · '+carb+'G · '+fat+'L</button>';
-  localStorage.setItem('profile_v1',JSON.stringify({age,height:h,weight:w,activity:act}));
-}
-
-function applyCalc(k,p,c,f){
-  document.getElementById('g-kcal').value=k;
-  document.getElementById('g-prot').value=p;
-  document.getElementById('g-carb').value=c;
-  document.getElementById('g-fat').value=f;
-  saveGoals();
 }
 
 function saveGoals(){
