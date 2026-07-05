@@ -409,36 +409,7 @@ let foods=[],foodDB=[],GOALS={kcal:2600,prot:210,carb:230,fat:95},gymDays={},prs
 let currentDate=new Date().toISOString().split('T')[0];
 const todayStr=()=>new Date().toISOString().split('T')[0];
 
-const SEED_DB=[
- {name:'Blanc de poulet',kcal:165,prot:31,carb:0,fat:3.6},
- {name:'Dinde',kcal:135,prot:29,carb:0,fat:1.8},
- {name:'Boeuf haché 5%',kcal:137,prot:26,carb:0,fat:5},
- {name:'Saumon',kcal:208,prot:20,carb:0,fat:13},
- {name:'Thon naturel',kcal:116,prot:26,carb:0,fat:1},
- {name:'Oeuf',kcal:143,prot:13,carb:1.1,fat:10},
- {name:'Riz blanc cuit',kcal:130,prot:2.7,carb:28,fat:0.3},
- {name:'Riz complet cuit',kcal:111,prot:2.6,carb:23,fat:0.9},
- {name:'Pâtes cuites',kcal:158,prot:5.8,carb:31,fat:0.9},
- {name:'Pain complet',kcal:247,prot:13,carb:41,fat:3.4},
- {name:'Flocons avoine',kcal:379,prot:13,carb:67,fat:7},
- {name:'Pomme de terre cuite',kcal:87,prot:1.9,carb:20,fat:0.1},
- {name:'Patate douce',kcal:86,prot:1.6,carb:20,fat:0.1},
- {name:'Avocat',kcal:160,prot:2,carb:2,fat:15},
- {name:'Banane',kcal:89,prot:1.1,carb:23,fat:0.3},
- {name:'Pomme',kcal:52,prot:0.3,carb:14,fat:0.2},
- {name:'Yaourt nature',kcal:61,prot:4,carb:5,fat:3.2},
- {name:'Fromage blanc 0%',kcal:47,prot:8,carb:4,fat:0.2},
- {name:'Skyr',kcal:65,prot:11,carb:4,fat:0.3},
- {name:'Lentilles cuites',kcal:116,prot:9,carb:20,fat:0.4},
- {name:'Pois chiches cuits',kcal:164,prot:9,carb:27,fat:2.6},
- {name:'Amandes',kcal:579,prot:21,carb:22,fat:50},
- {name:'Beurre de cacahuète',kcal:588,prot:25,carb:20,fat:50},
- {name:'Whey (1 dose 30g)',kcal:380,prot:75,carb:8,fat:5},
- {name:'Huile olive',kcal:884,prot:0,carb:0,fat:100},
- {name:'Brocoli',kcal:34,prot:2.8,carb:7,fat:0.4},
- {name:'Courgette',kcal:17,prot:1.2,carb:3.1,fat:0.3},
- {name:'Haricots verts',kcal:31,prot:1.8,carb:7,fat:0.2},
-];
+const SEED_DB=[];
 
 function load(){
   try{foods=JSON.parse(localStorage.getItem('foods_v3')||'[]');}catch(e){foods=[];}
@@ -452,10 +423,7 @@ function load(){
 function migrate(){
   const v=parseInt(localStorage.getItem('schema_v')||'1');
   if(v<2){
-    // Seed DB si vide
-    if(!foodDB.length){
-      foodDB=SEED_DB.map((f,i)=>({id:Date.now()+i,image:null,satfat:null,sugars:null,fiber:null,...f}));
-    }
+    // Base vide au départ — l'utilisateur la remplit lui-même
     // Migrer les anciennes séances (trainings_v3) en jours de salle + PRs
     try{
       const olds=JSON.parse(localStorage.getItem('trainings_v3')||'[]');
@@ -1031,21 +999,47 @@ function importData(ev){
     const st=document.getElementById('import-status');
     try{
       const d=JSON.parse(e.target.result);
-      // Fusion par id
+      // Compat : ancienne version (foods/trainings/goals/foodDB) ET nouvelle (foods_v3/...)
+      const inFoods = d.foods_v3 || d.foods || [];
+      const inDB    = d.fooddb_v1 || d.foodDB || [];
+      const inGoals = d.goals_v3 || d.goals || null;
+      const inTrain = d.trainings_v3 || d.trainings || [];
+      const inGym   = d.gym_v1 || null;
+      const inPrs   = d.prs_v1 || null;
+      const inProfile = d.profile_v1 || null;
+
       const mergeById=(cur,inc)=>{
         const ids=new Set(cur.map(x=>x.id));
-        return [...cur,...(inc||[]).filter(x=>!ids.has(x.id))];
+        return [...cur,...(inc||[]).filter(x=>x&&!ids.has(x.id))];
       };
-      foods=mergeById(foods,d.foods_v3);
-      foodDB=mergeById(foodDB,d.fooddb_v1);
-      prs=mergeById(prs,d.prs_v1);
-      if(d.goals_v3)GOALS=d.goals_v3;
-      if(d.gym_v1)gymDays={...gymDays,...d.gym_v1};
-      if(d.profile_v1&&Object.keys(d.profile_v1).length)localStorage.setItem('profile_v1',JSON.stringify(d.profile_v1));
-      if(d.trainings_v3)localStorage.setItem('trainings_v3',JSON.stringify(d.trainings_v3));
+      foods=mergeById(foods,inFoods);
+      foodDB=mergeById(foodDB,inDB);
+      if(inGoals)GOALS=inGoals;
+
+      // Muscu : si format nouveau, fusionner directement
+      if(inGym)gymDays={...gymDays,...inGym};
+      if(inPrs)prs=mergeById(prs,inPrs);
+
+      // Si l'export vient de l'ancienne version : convertir trainings → gymDays + PRs
+      if(inTrain && inTrain.length){
+        localStorage.setItem('trainings_v3',JSON.stringify(inTrain));
+        inTrain.forEach(t=>{
+          if(t.date)gymDays[t.date]=true;
+          (t.exercises||[]).forEach(ex=>{
+            if(ex.weight){
+              const cur=prs.find(p=>p.name===ex.name);
+              if(!cur)prs.push({id:Date.now()+Math.random(),name:ex.name,weight:ex.weight,date:t.date});
+              else if(ex.weight>cur.weight){cur.weight=ex.weight;cur.date=t.date;}
+            }
+          });
+        });
+      }
+
+      if(inProfile&&Object.keys(inProfile).length)localStorage.setItem('profile_v1',JSON.stringify(inProfile));
+
       persist();
       st.style.display='block';st.style.background='rgba(0,255,200,.1)';st.style.color='#00ffc8';
-      st.textContent='Import réussi — '+foods.length+' entrées, '+foodDB.length+' aliments';
+      st.textContent='Import réussi — '+foods.length+' repas, '+foodDB.length+' aliments, '+prs.length+' PRs';
       renderDay();
     }catch(err){
       st.style.display='block';st.style.background='rgba(248,113,113,.1)';st.style.color='#f87171';
