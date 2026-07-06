@@ -286,10 +286,11 @@ input[type=number]{-moz-appearance:textfield}
       <button class="btn btn-ghost" style="width:100%" onclick="saveSyncConfig()">Enregistrer la configuration</button>
     </div>
     <div id="sync-actions" style="display:none">
-      <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Code : <span id="sync-code-lbl" class="mono" style="color:var(--cyan)"></span></div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:6px">Code : <span id="sync-code-lbl" class="mono" style="color:var(--cyan)"></span></div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--cyan);margin-bottom:12px"><span style="width:6px;height:6px;border-radius:50%;background:var(--cyan);animation:none"></span><span id="sync-auto-state">Sync auto active</span></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
         <button class="btn btn-cy" onclick="syncPush()">↑ Envoyer</button>
-        <button class="btn btn-ghost" onclick="syncPull()">↓ Récupérer</button>
+        <button class="btn btn-ghost" onclick="syncPull(true)">↓ Récupérer</button>
       </div>
       <button class="btn btn-ghost" style="width:100%;font-size:11px;min-height:36px" onclick="clearSyncConfig()">Changer de configuration</button>
     </div>
@@ -479,6 +480,8 @@ function persist(){
   localStorage.setItem('gym_v1',JSON.stringify(gymDays));
   localStorage.setItem('prs_v1',JSON.stringify(prs));
   localStorage.setItem('excluded_v1',JSON.stringify(excludedDays));
+  localStorage.setItem('local_updated',new Date().toISOString());
+  scheduleAutoPush();
 }
 
 /* ═══════════ NAV ═══════════ */
@@ -1244,7 +1247,7 @@ function syncStatus(msg,ok){
 
 function snapshot(){
   return {
-    schema:SCHEMA,updated:new Date().toISOString(),
+    schema:SCHEMA,updated:localStorage.getItem('local_updated')||new Date().toISOString(),
     foods_v3:foods,fooddb_v1:foodDB,goals_v3:GOALS,gym_v1:gymDays,prs_v1:prs,excluded_v1:excludedDays,
     profile_v1:JSON.parse(localStorage.getItem('profile_v1')||'{}')
   };
@@ -1252,6 +1255,7 @@ function snapshot(){
 
 async function syncPush(){
   if(!syncCfg)return;
+  localStorage.setItem('local_updated',new Date().toISOString());
   syncStatus('Envoi en cours…');
   try{
     const body={code:syncCfg.code,data:snapshot(),updated:new Date().toISOString()};
@@ -1266,6 +1270,8 @@ async function syncPush(){
       body:JSON.stringify(body)
     });
     if(!res.ok){const t=await res.text();throw new Error(res.status+' '+t);}
+    lastSyncedStamp=body.updated;
+    updateSyncIndicator('Synchronisé à '+new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}));
     syncStatus('Données envoyées ✓ '+new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}),true);
     toast('Envoyé au cloud ✓');
   }catch(e){
@@ -1273,24 +1279,34 @@ async function syncPush(){
   }
 }
 
-async function syncPull(){
+async function syncPull(manual){
   if(!syncCfg)return;
-  syncStatus('Récupération…');
+  if(manual)syncStatus('Récupération…');
   try{
     const res=await fetch(syncCfg.url+'/rest/v1/pedro_sync?code=eq.'+encodeURIComponent(syncCfg.code)+'&select=data,updated',{
       headers:{'apikey':syncCfg.key,'Authorization':'Bearer '+syncCfg.key}
     });
     if(!res.ok){const t=await res.text();throw new Error(res.status+' '+t);}
     const rows=await res.json();
-    if(!rows.length){syncStatus('Aucune donnée cloud pour ce code — envoie d\'abord depuis un appareil.',false);return;}
+    if(!rows.length){if(manual)syncStatus('Aucune donnée cloud pour ce code — envoie d\'abord depuis un appareil.',false);return;}
     const d=rows[0].data;
+    const cloudStamp=rows[0].updated||d.updated||'';
+    const localStamp=localStorage.getItem('local_updated')||'';
+    // Fusion additive dans tous les cas (ne perd jamais un ajout local)
     mergeSnapshot(d);
-    persist();
-    syncStatus('Récupéré et fusionné ✓',true);
-    toast('Données récupérées ✓');
+    // Pour les champs "écrasables" (objectifs, profil), le plus récent gagne
+    if(cloudStamp>localStamp){
+      if(d.goals_v3)GOALS=d.goals_v3;
+      if(d.profile_v1&&Object.keys(d.profile_v1).length)localStorage.setItem('profile_v1',JSON.stringify(d.profile_v1));
+    }
+    lastSyncedStamp=cloudStamp;
+    persist(); // met à jour local_updated + repush la version fusionnée
+    if(manual){syncStatus('Récupéré et fusionné ✓',true);toast('Données récupérées ✓');}
+    updateSyncIndicator('Synchronisé à '+new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}));
     renderDay();
   }catch(e){
-    syncStatus('Échec récupération : '+e.message,false);
+    if(manual)syncStatus('Échec récupération : '+e.message,false);
+    else updateSyncIndicator('Sync auto en pause (hors-ligne ?)');
   }
 }
 
@@ -1307,6 +1323,59 @@ function mergeSnapshot(d){
   if(d.excluded_v1)excludedDays={...excludedDays,...d.excluded_v1};
   if(d.profile_v1&&Object.keys(d.profile_v1).length)localStorage.setItem('profile_v1',JSON.stringify(d.profile_v1));
 }
+
+
+
+/* ═══════════ AUTO-SYNC (Option B, horodaté) ═══════════ */
+let lastSyncedStamp=null;
+let autoPushTimer=null;
+let autoPushing=false;
+
+function scheduleAutoPush(){
+  if(!syncCfg)return;
+  clearTimeout(autoPushTimer);
+  updateSyncIndicator('Modifs non synchronisées…');
+  autoPushTimer=setTimeout(()=>{autoPush();},2500);
+}
+
+async function autoPush(){
+  if(!syncCfg||autoPushing)return;
+  autoPushing=true;
+  try{
+    const body={code:syncCfg.code,data:snapshot(),updated:localStorage.getItem('local_updated')};
+    const res=await fetch(syncCfg.url+'/rest/v1/pedro_sync',{
+      method:'POST',
+      headers:{'apikey':syncCfg.key,'Authorization':'Bearer '+syncCfg.key,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},
+      body:JSON.stringify(body)
+    });
+    if(res.ok){
+      lastSyncedStamp=body.updated;
+      updateSyncIndicator('Synchronisé à '+new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}));
+    }else{
+      updateSyncIndicator('Sync auto échouée');
+    }
+  }catch(e){
+    updateSyncIndicator('Sync auto en pause (hors-ligne ?)');
+  }
+  autoPushing=false;
+}
+
+function updateSyncIndicator(txt){
+  const el=document.getElementById('sync-auto-state');
+  if(el)el.textContent=txt;
+}
+
+// Au démarrage : si config présente, tirer le cloud (fusion + timestamp)
+async function initAutoSync(){
+  if(!syncCfg)return;
+  updateSyncIndicator('Vérification du cloud…');
+  await syncPull(false);
+}
+
+// Pull auto quand l'app revient au premier plan (changement d'appareil)
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'&&syncCfg){syncPull(false);}
+});
 
 
 /* ═══════════ LECTURE ÉTIQUETTE IA (Gemini) ═══════════ */
@@ -1419,7 +1488,9 @@ async function geminiReadLabel(file){
 /* ═══════════ INIT ═══════════ */
 load();
 loadAIKey();
+loadSyncConfig();
 renderDay();
+initAutoSync();
 
 </script>
 </body>
