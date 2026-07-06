@@ -705,6 +705,13 @@ function loadTesseract(){
   });
 }
 
+let pendingOCRFile=null;
+function fallbackLocal(){
+  if(!pendingOCRFile)return;
+  const fake={target:{files:[pendingOCRFile],value:''}};
+  const savedKey=aiKey;aiKey=null; // force local path
+  runOCR(fake).finally(()=>{aiKey=savedKey;});
+}
 async function runOCR(ev){
   const file=ev.target.files[0];if(!file)return;
   const st=document.getElementById('ocr-status');
@@ -724,7 +731,13 @@ async function runOCR(ev){
       ev.target.value='';
       return;
     }catch(e){
-      st.textContent='IA indisponible ('+e.message.slice(0,40)+') — lecture locale…';
+      // Affiche l'erreur complète et s'arrête pour diagnostic (pas de fallback silencieux)
+      st.innerHTML='<div style="color:#f87171;font-weight:600;margin-bottom:4px">Erreur IA</div>'
+        +'<div style="font-size:11px;color:var(--text2);word-break:break-word;line-height:1.5">'+String(e.message).replace(/</g,'&lt;')+'</div>'
+        +'<button class="btn btn-ghost" style="width:100%;margin-top:10px;min-height:38px;font-size:12px" onclick="fallbackLocal()">Essayer la lecture locale à la place</button>';
+      pendingOCRFile=file;
+      ev.target.value='';
+      return;
     }
   }
 
@@ -1341,7 +1354,7 @@ async function geminiReadLabel(file){
     +'{"kcal":number,"prot":number,"carb":number,"fat":number}. '
     +'prot=protéines, carb=glucides (total, pas seulement les sucres), fat=lipides/matières grasses (total, pas seulement saturés). '
     +'Si une valeur est illisible ou absente, mets null pour cette valeur. Utilise le point comme séparateur décimal.';
-  const url='https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+encodeURIComponent(aiKey);
+  const url='https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key='+encodeURIComponent(aiKey);
   const res=await fetch(url,{
     method:'POST',
     headers:{'Content-Type':'application/json'},
